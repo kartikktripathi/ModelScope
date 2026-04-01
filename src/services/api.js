@@ -24,7 +24,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * @param {number} retries - Number of retries left
  * @returns {Promise<any>}
  */
-export async function executeAiTask(modelName, body, retries = 3, signal = null) {
+export async function executeAiTask(modelName, body, retries = 3, signal = null, taskType = "generation") {
   // Simulate API call if execution is not possible on the Hugging Face Router for openai-community/gpt2
   if (modelName === "openai-community/gpt2") {
     if (signal?.aborted) throw new Error("AbortError");
@@ -38,7 +38,35 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null)
     };
   }
 
-  const url = `${BASE_URL}${modelName}`;
+    // Determine if we should route to Chat Completions API by default
+  const isChatFallback = modelName !== "openai-community/gpt2" && /llama|mistral|qwen|deepseek|instruct|chat|gemma|phi/i.test(modelName);
+
+  const url = isChatFallback
+    ? "https://router.huggingface.co/v1/chat/completions"
+    : `${BASE_URL}${modelName}`;
+
+  const getChatMessages = (task, input) => {
+    let sys = "You are a helpful AI assistant.";
+    if (task === "translation") sys = "You are an expert translator. Translate the following text from English to French. Respond ONLY with the final translation, no conversational filler or explanations.";
+    if (task === "summarization") sys = "You are an expert summarizer. Provide a concise summary of the following text.";
+    if (task === "sentiment") sys = "Analyze the sentiment of the following text. Respond strictly with 'POSITIVE' or 'NEGATIVE' only.";
+    // Many models (like DeepSeek R1) do not natively support the "system" role in Hugging Face Serverless API.
+    // We combine the system prompt and the user input into a single "user" message to guarantee compatibility.
+    return [
+      { role: "user", content: `Instruction: ${sys}\n\nInput Context: ${input}` }
+    ];
+  };
+
+  let requestBody;
+  if (isChatFallback) {
+    requestBody = {
+      model: modelName,
+      messages: getChatMessages(taskType, body.inputs),
+      max_tokens: body.parameters?.max_new_tokens || 200
+    };
+  } else {
+    requestBody = body;
+  }
 
   try {
     const response = await fetch(url, {
@@ -47,7 +75,7 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null)
         Authorization: `Bearer ${HF_TOKEN}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestBody),
       signal
     });
 
@@ -57,7 +85,7 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null)
         if (signal?.aborted) throw new Error("AbortError");
         console.warn(`Model ${modelName} encountered server error (${response.status}). Retrying in 5s...`);
         await delay(5000);
-        return executeAiTask(modelName, body, retries - 1, signal);
+        return executeAiTask(modelName, body, retries - 1, signal, taskType);
       } else {
         throw new Error(`Model ${modelName} failed to load after multiple retries.`);
       }
@@ -71,6 +99,20 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null)
     // Handle 400 Bad Request
     if (response.status === 400) {
       const errorText = await response.text();
+      if (isChatFallback) {
+        console.warn(`400 Bad Request on Chat API for ${modelName}. Retrying on Standard Inference API...`);
+        const fallbackRawPrompt = getChatMessages(taskType, body.inputs)[0].content + "\n\nOutput:";
+        const standardFallbackReq = await fetch(`${BASE_URL}${modelName}`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${HF_TOKEN}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ ...body, inputs: fallbackRawPrompt }),
+          signal
+        });
+        if (standardFallbackReq.ok) {
+          const standardJson = await standardFallbackReq.json();
+          return { status: standardFallbackReq.status, data: standardJson };
+        }
+      }
       throw new Error(`400 Bad Request: Incorrect JSON format or inputs for ${modelName}. Details: ${errorText}`);
     }
 
@@ -80,8 +122,8 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null)
       json = JSON.parse(rawText);
     } catch (e) {
       if (!response.ok) {
-        if (response.status === 404) {
-          // Attempt Chat Completions Fallback for Chat LLMs like DeepSeek, Llama
+        if (!isChatFallback && response.status === 404) {
+          // Attempt Chat Completions Fallback for generic models unrecognized by regex
           console.warn(`404 Not Found on standard route for ${modelName}. Attempting v1/chat/completions fallback...`);
           try {
             const chatRes = await fetch("https://router.huggingface.co/v1/chat/completions", {
@@ -89,8 +131,8 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null)
               headers: { Authorization: `Bearer ${HF_TOKEN}`, "Content-Type": "application/json" },
               body: JSON.stringify({
                 model: modelName,
-                messages: [{ role: "user", content: body.inputs }],
-                max_tokens: body.parameters?.max_new_tokens || 100
+                messages: getChatMessages(taskType, body.inputs),
+                max_tokens: body.parameters?.max_new_tokens || 200
               }),
               signal
             });
@@ -105,6 +147,23 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null)
             console.error("Chat completion fallback also failed:", chatErr);
           }
         }
+        
+        // Handle 404 for Chat Fallback models that aren't available on chat endpoint
+        if (isChatFallback && response.status === 404) {
+          console.warn(`404 Not Found on Chat route for ${modelName}. Retrying on Standard Inference API...`);
+          const fallbackRawPrompt = getChatMessages(taskType, body.inputs)[0].content + "\n\nOutput:";
+          const standardFallbackReq = await fetch(`${BASE_URL}${modelName}`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${HF_TOKEN}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ ...body, inputs: fallbackRawPrompt }),
+            signal
+          });
+          if (standardFallbackReq.ok) {
+            const standardJson = await standardFallbackReq.json();
+            return { status: standardFallbackReq.status, data: standardJson };
+          }
+        }
+        
         throw new Error(`API Error for ${modelName}: ${response.status} ${response.statusText} - ${rawText}`);
       }
       throw new Error(`Invalid JSON from ${modelName}: ${rawText}`);
@@ -116,12 +175,18 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null)
         if (signal?.aborted) throw new Error("AbortError");
         console.warn(`Model ${modelName} is still initializing (JSON error). Retrying in 5s...`);
         await delay(5000);
-        return executeAiTask(modelName, body, retries - 1, signal);
+        return executeAiTask(modelName, body, retries - 1, signal, taskType);
       }
     }
 
     if (!response.ok) {
       throw new Error(`API Error for ${modelName}: ${response.status} ${response.statusText} - ${JSON.stringify(json)}`);
+    }
+
+    if (isChatFallback && json.choices) {
+      const msg = json.choices[0]?.message || {};
+      const generatedOutput = (msg.reasoning_content ? `[Thought Process]\n${msg.reasoning_content}\n\n[Output]\n` : "") + (msg.content || "");
+      json = [{ generated_text: generatedOutput.trim() || "Empty conversational response." }];
     }
 
     return { status: response.status, data: json };
@@ -133,7 +198,7 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null)
         if (signal?.aborted) throw error;
         console.warn(`Network error making request to ${modelName}. Retrying in 5s...`);
         await delay(5000);
-        return executeAiTask(modelName, body, retries - 1, signal);
+        return executeAiTask(modelName, body, retries - 1, signal, taskType);
       }
     }
     throw error;
@@ -143,15 +208,15 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null)
 // Pre-packaged tasks
 export const tasks = {
   summarization: async (text) => {
-    return executeAiTask(MODELS.summarization, { inputs: text });
+    return executeAiTask(MODELS.summarization, { inputs: text }, 3, null, "summarization");
   },
   sentiment: async (text) => {
-    return executeAiTask(MODELS.sentiment, { inputs: text });
+    return executeAiTask(MODELS.sentiment, { inputs: text }, 3, null, "sentiment");
   },
   generation: async (text) => {
-    return executeAiTask(MODELS.generation, { inputs: text, parameters: { max_new_tokens: 30 } });
+    return executeAiTask(MODELS.generation, { inputs: text, parameters: { max_new_tokens: 30 } }, 3, null, "generation");
   },
   translation: async (text) => {
-    return executeAiTask(MODELS.translation, { inputs: text });
+    return executeAiTask(MODELS.translation, { inputs: text }, 3, null, "translation");
   },
 };

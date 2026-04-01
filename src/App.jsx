@@ -121,7 +121,7 @@ function App() {
 
         console.log(`Sending API Request to ${targetEndpoint}:`, payload);
         const start = Date.now();
-        const response = await executeAiTask(targetEndpoint, payload, 3, signal);
+        const response = await executeAiTask(targetEndpoint, payload, 3, signal, task.key);
         const time = Date.now() - start;
         console.log(`Received API Response from ${targetEndpoint}:`, response.data);
 
