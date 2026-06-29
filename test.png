@@ -1,0 +1,9 @@
+HTTP/2 307 
+cache-control: no-cache, no-store, must-revalidate
+content-type: text/html
+expires: 0
+location: http://redirect.whalebone.io:80/passthrough?data=eyJNZXRob2QiOiJQT1NUIiwiU2NoZW1lIjoiaHR0cHMiLCJIb3N0IjoiYXBpLWluZmVyZW5jZS5odWdnaW5nZmFjZS5jbyIsIlBvcnQiOiI0NDMiLCJQb3N0RGF0YSI6IiIsIlBhdGgiOiIvbW9kZWxzL3N0YWJpbGl0eWFpL3N0YWJsZS1kaWZmdXNpb24teGwtYmFzZS0xLjAiLCJRdWVyeSI6Int9IiwiU2lua2hvbGVJRCI6MjAwMDE3MiwiTnVtYmVyT2ZSZWRpcmVjdHMiOjB9
+pragma: no-cache
+content-length: 0
+date: Mon, 29 Jun 2026 15:36:50 GMT
+

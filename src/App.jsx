@@ -51,12 +51,70 @@ const AI_CONFIG = [
   }
 ];
 
+const IMAGE_CONFIG = [
+  {
+    key: "flux",
+    name: "Input Prompt Test",
+    endpoint: "black-forest-labs/FLUX.1-dev",
+    modelFriendly: "FLUX.1-dev",
+    defaultPrompt: "A futuristic cyberpunk cityscape with neon lights, high resolution, 8k",
+    expectedField: "image",
+    testType: "prompt"
+  },
+  {
+    key: "krea",
+    name: "Negative Prompt Test",
+    endpoint: "krea/Krea-2-Turbo",
+    modelFriendly: "Krea-2-Turbo",
+    defaultPrompt: "A futuristic cyberpunk cityscape with neon lights, high resolution, 8k",
+    defaultNegativePrompt: "blurry, low quality, distorted anatomy, extra limbs",
+    expectedField: "image",
+    testType: "negative"
+  },
+  {
+    key: "zimage",
+    name: "Aspect Ratio Test",
+    endpoint: "Tongyi-MAI/Z-Image-Turbo",
+    modelFriendly: "Z-Image-Turbo",
+    defaultPrompt: "A futuristic cyberpunk cityscape with neon lights, high resolution, 8k",
+    defaultAspectRatio: "1:1",
+    expectedField: "image",
+    testType: "ratio"
+  },
+  {
+    key: "sdxl",
+    name: "Guidance Scale Test",
+    endpoint: "stabilityai/stable-diffusion-xl-base-1.0",
+    modelFriendly: "stable-diffusion-xl-base-1.0",
+    defaultPrompt: "A futuristic cyberpunk cityscape with neon lights, high resolution, 8k",
+    defaultGuidanceScale: 7.5,
+    expectedField: "image",
+    testType: "guidance"
+  }
+];
+
+const getDimensions = (ratio) => {
+  if (ratio === "16:9") return { width: 1024, height: 576 };
+  if (ratio === "9:16") return { width: 576, height: 1024 };
+  return { width: 1024, height: 1024 }; // 1:1 (Square)
+};
+
 function App() {
+  const [mode, setMode] = useState('text'); // 'text' or 'image'
   const [results, setResults] = useState({});
   const [isRunning, setIsRunning] = useState(false);
   const [customModels, setCustomModels] = useState({});
   const [customInputs, setCustomInputs] = useState({});
+  
+  // Image mode states
+  const [customPrompts, setCustomPrompts] = useState({});
+  const [customNegativePrompts, setCustomNegativePrompts] = useState({});
+  const [customAspectRatios, setCustomAspectRatios] = useState({});
+  const [customGuidanceScales, setCustomGuidanceScales] = useState({});
+
   const abortControllerRef = useRef(null);
+
+  const activeConfig = mode === 'text' ? AI_CONFIG : IMAGE_CONFIG;
 
   const cancelTasks = () => {
     if (abortControllerRef.current) {
@@ -81,29 +139,55 @@ function App() {
     });
   };
 
-  // Initialize status
+  // Initialize status and clean up object URLs when mode changes
   useEffect(() => {
+    // Revoke any existing object URLs in current results to prevent leaks
+    Object.values(results).forEach(result => {
+      if (result.isImage && result.data && result.data.startsWith('blob:')) {
+        URL.revokeObjectURL(result.data);
+      }
+    });
+
     const init = {};
-    AI_CONFIG.forEach(task => {
+    activeConfig.forEach(task => {
       init[task.key] = { status: 'pending', data: null, statusCode: '-', raw: null };
     });
     setResults(init);
-  }, []);
+
+    // Cleanup function to revoke Object URLs on unmount
+    return () => {
+      setResults(prev => {
+        Object.values(prev).forEach(result => {
+          if (result.isImage && result.data && result.data.startsWith('blob:')) {
+            URL.revokeObjectURL(result.data);
+          }
+        });
+        return prev;
+      });
+    };
+  }, [mode]);
 
   const runAllTasks = async () => {
     setIsRunning(true);
     abortControllerRef.current = new AbortController();
     const signal = abortControllerRef.current.signal;
 
+    // Clean up old object URLs from results before starting a new run
+    Object.values(results).forEach(result => {
+      if (result.isImage && result.data && result.data.startsWith('blob:')) {
+        URL.revokeObjectURL(result.data);
+      }
+    });
+
     // Reset statuses to loading
     const pendingState = {};
-    AI_CONFIG.forEach(task => {
+    activeConfig.forEach(task => {
       pendingState[task.key] = { status: 'loading', data: null, statusCode: '-', raw: null };
     });
     setResults(pendingState);
 
     // Run sequentially as requested: "execute all tasks sequentially"
-    for (const task of AI_CONFIG) {
+    for (const task of activeConfig) {
       if (signal.aborted) break;
       setResults(prev => ({
         ...prev,
@@ -111,36 +195,69 @@ function App() {
       }));
 
       try {
-        const targetInput = customInputs[task.key] !== undefined ? customInputs[task.key] : task.inputs;
-        const payload = { inputs: targetInput };
-        if (task.parameters) payload.parameters = task.parameters;
-
         const targetEndpoint = customModels[task.key] && customModels[task.key].trim() !== ''
           ? customModels[task.key].trim()
           : task.endpoint;
+
+        let payload;
+        if (mode === 'text') {
+          const targetInput = customInputs[task.key] !== undefined ? customInputs[task.key] : task.inputs;
+          payload = { inputs: targetInput };
+          if (task.parameters) payload.parameters = task.parameters;
+        } else {
+          const prompt = customPrompts[task.key] !== undefined ? customPrompts[task.key] : task.defaultPrompt;
+          payload = { inputs: prompt };
+
+          const parameters = {};
+          if (task.testType === "negative") {
+            const negativePrompt = customNegativePrompts[task.key] !== undefined ? customNegativePrompts[task.key] : task.defaultNegativePrompt;
+            parameters.negative_prompt = negativePrompt;
+          }
+          if (task.testType === "ratio") {
+            const ratio = customAspectRatios[task.key] !== undefined ? customAspectRatios[task.key] : task.defaultAspectRatio;
+            const { width, height } = getDimensions(ratio);
+            parameters.width = width;
+            parameters.height = height;
+          }
+          if (task.testType === "guidance") {
+            const guidanceScale = customGuidanceScales[task.key] !== undefined ? customGuidanceScales[task.key] : task.defaultGuidanceScale;
+            parameters.guidance_scale = Number(guidanceScale);
+          }
+
+          if (Object.keys(parameters).length > 0) {
+            payload.parameters = parameters;
+          }
+        }
 
         console.log(`Sending API Request to ${targetEndpoint}:`, payload);
         const start = Date.now();
         const response = await executeAiTask(targetEndpoint, payload, 3, signal, task.key);
         const time = Date.now() - start;
-        console.log(`Received API Response from ${targetEndpoint}:`, response.data);
+        console.log(`Received API Response from ${targetEndpoint}:`, response);
 
         // Fallback robust extractor for totally unpredictable custom model structures
         let finalData;
-        try {
-          finalData = task.extractField(response.data);
-          if (finalData === "N/A" || !finalData) {
-            // Aggressively seek plain text fields so mismatched task types render beautifully instead of JSON
-            const firstItem = Array.isArray(response.data) ? response.data[0] : response.data;
-            if (firstItem && typeof firstItem === 'object') {
-              finalData = firstItem.generated_text || firstItem.summary_text || firstItem.translation_text || firstItem.text || firstItem.answer;
+        let isImage = false;
+
+        if (response.isImage) {
+          finalData = URL.createObjectURL(response.data);
+          isImage = true;
+        } else {
+          try {
+            finalData = task.extractField(response.data);
+            if (finalData === "N/A" || !finalData) {
+              // Aggressively seek plain text fields so mismatched task types render beautifully instead of JSON
+              const firstItem = Array.isArray(response.data) ? response.data[0] : response.data;
+              if (firstItem && typeof firstItem === 'object') {
+                finalData = firstItem.generated_text || firstItem.summary_text || firstItem.translation_text || firstItem.text || firstItem.answer;
+              }
+              if (!finalData) {
+                finalData = JSON.stringify(response.data, null, 2);
+              }
             }
-            if (!finalData) {
-              finalData = JSON.stringify(response.data, null, 2);
-            }
+          } catch (e) {
+            finalData = JSON.stringify(response.data, null, 2);
           }
-        } catch (e) {
-          finalData = JSON.stringify(response.data, null, 2);
         }
 
         setResults(prev => ({
@@ -148,8 +265,9 @@ function App() {
           [task.key]: {
             status: 'success',
             data: finalData,
+            isImage,
             statusCode: response.status,
-            raw: JSON.stringify(response.data, null, 2),
+            raw: response.isImage ? '[Binary Image Data]' : JSON.stringify(response.data, null, 2),
             timeMs: time,
             executedModel: targetEndpoint
           }
@@ -183,24 +301,46 @@ function App() {
       </header>
 
       <main className="dashboard">
-        <section className="control-panel">
-          <div>
-            <h3>Execution Control</h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '0.25rem' }}>
-              Run 4 AI tasks sequentially using Bearer Auth with Hugging Face API.
-            </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="mode-switch">
+            <button
+              className={mode === 'text' ? 'active' : ''}
+              onClick={() => !isRunning && setMode('text')}
+              disabled={isRunning}
+            >
+              Text Generation
+            </button>
+            <button
+              className={mode === 'image' ? 'active' : ''}
+              onClick={() => !isRunning && setMode('image')}
+              disabled={isRunning}
+            >
+              Image Generation
+            </button>
           </div>
-          <button
-            className="btn-primary"
-            onClick={isRunning ? cancelTasks : runAllTasks}
-            style={isRunning ? { backgroundColor: 'transparent', borderColor: 'var(--error)', color: 'var(--error)' } : {}}
-          >
-            {isRunning ? '⏹ Cancel Execution' : '▶ Run API Test Suite'}
-          </button>
-        </section>
+
+          <section className="control-panel">
+            <div>
+              <h3>Execution Control</h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '0.25rem' }}>
+                {mode === 'text' 
+                  ? 'Run 4 text AI tasks sequentially using Bearer Auth with Hugging Face API.' 
+                  : 'Run 4 image AI models sequentially using Bearer Auth with Hugging Face API.'
+                }
+              </p>
+            </div>
+            <button
+              className="btn-primary"
+              onClick={isRunning ? cancelTasks : runAllTasks}
+              style={isRunning ? { backgroundColor: 'transparent', borderColor: 'var(--error)', color: 'var(--error)' } : {}}
+            >
+              {isRunning ? '⏹ Cancel Execution' : '▶ Run API Test Suite'}
+            </button>
+          </section>
+        </div>
 
         <section className="results-grid">
-          {AI_CONFIG.map((task) => {
+          {activeConfig.map((task) => {
             const result = results[task.key] || { status: 'pending', raw: null, executedModel: '-' };
             return (
               <div key={task.key} className="task-card">
@@ -224,27 +364,111 @@ function App() {
                   />
                 </div>
 
-                <div className="input-group">
-                  <label htmlFor={`input-${task.key}`}>Input Query</label>
-                  <textarea
-                    id={`input-${task.key}`}
-                    placeholder={task.inputs}
-                    value={customInputs[task.key] !== undefined ? customInputs[task.key] : task.inputs}
-                    onChange={(e) => setCustomInputs({ ...customInputs, [task.key]: e.target.value })}
-                    className="model-input"
-                    disabled={isRunning}
-                    style={{ resize: 'vertical', minHeight: '60px', lineHeight: '1.4' }}
-                  />
-                </div>
+                {mode === 'text' ? (
+                  <div className="input-group">
+                    <label htmlFor={`input-${task.key}`}>Input Query</label>
+                    <textarea
+                      id={`input-${task.key}`}
+                      placeholder={task.inputs}
+                      value={customInputs[task.key] !== undefined ? customInputs[task.key] : task.inputs}
+                      onChange={(e) => setCustomInputs({ ...customInputs, [task.key]: e.target.value })}
+                      className="model-input"
+                      disabled={isRunning}
+                      style={{ resize: 'vertical', minHeight: '60px', lineHeight: '1.4' }}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div className="input-group">
+                      <label htmlFor={`prompt-${task.key}`}>Input Prompt</label>
+                      <textarea
+                        id={`prompt-${task.key}`}
+                        placeholder={task.defaultPrompt}
+                        value={customPrompts[task.key] !== undefined ? customPrompts[task.key] : task.defaultPrompt}
+                        onChange={(e) => setCustomPrompts({ ...customPrompts, [task.key]: e.target.value })}
+                        className="model-input"
+                        disabled={isRunning}
+                        style={{ resize: 'vertical', minHeight: '60px', lineHeight: '1.4' }}
+                      />
+                    </div>
+
+                    {task.testType === "negative" && (
+                      <div className="input-group">
+                        <label htmlFor={`negative-${task.key}`}>Negative Prompt (Optional)</label>
+                        <input
+                          id={`negative-${task.key}`}
+                          type="text"
+                          placeholder={task.defaultNegativePrompt}
+                          value={customNegativePrompts[task.key] !== undefined ? customNegativePrompts[task.key] : task.defaultNegativePrompt}
+                          onChange={(e) => setCustomNegativePrompts({ ...customNegativePrompts, [task.key]: e.target.value })}
+                          className="model-input"
+                          disabled={isRunning}
+                        />
+                      </div>
+                    )}
+
+                    {task.testType === "ratio" && (
+                      <div className="input-group">
+                        <label htmlFor={`ratio-${task.key}`}>Aspect Ratio / Dimensions</label>
+                        <select
+                          id={`ratio-${task.key}`}
+                          value={customAspectRatios[task.key] !== undefined ? customAspectRatios[task.key] : task.defaultAspectRatio}
+                          onChange={(e) => setCustomAspectRatios({ ...customAspectRatios, [task.key]: e.target.value })}
+                          className="model-select"
+                          disabled={isRunning}
+                        >
+                          <option value="1:1">1:1 (Square)</option>
+                          <option value="16:9">16:9 (Landscape)</option>
+                          <option value="9:16">9:16 (Portrait)</option>
+                        </select>
+                      </div>
+                    )}
+
+                    {task.testType === "guidance" && (
+                      <div className="input-group slider-container">
+                        <div className="slider-header">
+                          <span>Guidance Scale / CFG Scale</span>
+                          <span className="slider-value">
+                            {customGuidanceScales[task.key] !== undefined ? customGuidanceScales[task.key] : task.defaultGuidanceScale}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="1"
+                          max="20"
+                          step="0.5"
+                          value={customGuidanceScales[task.key] !== undefined ? customGuidanceScales[task.key] : task.defaultGuidanceScale}
+                          onChange={(e) => setCustomGuidanceScales({ ...customGuidanceScales, [task.key]: parseFloat(e.target.value) })}
+                          className="model-slider"
+                          disabled={isRunning}
+                        />
+                        <span className="slider-hint">
+                          {(() => {
+                            const val = customGuidanceScales[task.key] !== undefined ? customGuidanceScales[task.key] : task.defaultGuidanceScale;
+                            if (val < 6) return "Low scale: More creative, organic, and abstract interpretation.";
+                            if (val > 12) return "High scale: Strict adherence to prompt tags, but risk of quality cost.";
+                            return "Balanced: Strong prompt adherence with good quality.";
+                          })()}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
 
                 <div className="output-container">
                   {result.status === 'pending' && <span style={{ color: '#888' }}>Awaiting execution...</span>}
                   {result.status === 'loading' && <span style={{ color: '#fff' }}>Initializing model & fetching response...</span>}
                   {result.status === 'cancelled' && <span style={{color: 'var(--error)'}}>Execution cancelled by user.</span>}
                   {result.status === 'success' && (
-                    <div style={{ color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: '1.6', fontSize: '1rem' }}>
-                      {result.data}
-                    </div>
+                    result.isImage ? (
+                      <div className="generated-image-container">
+                        <img src={result.data} alt="AI Generated Output" className="generated-image" />
+                      </div>
+                    ) : (
+                      <div style={{ color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: '1.6', fontSize: '1rem' }}>
+                        {result.data}
+                      </div>
+                    )
                   )}
                   {result.status === 'error' && (
                     <div className="error-container">
@@ -305,7 +529,7 @@ function App() {
             <table className="observation-table">
               <thead>
               <tr>
-                <th>Task</th>
+                <th>Task / Model</th>
                 <th>Endpoint</th>
                 <th>Method</th>
                 <th>Status Code</th>
@@ -313,11 +537,11 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {AI_CONFIG.map((task) => {
+              {activeConfig.map((task) => {
                 const result = results[task.key] || { statusCode: '-', executedModel: '-' };
                 return (
                   <tr key={task.key}>
-                    <td>{task.name.split(' ')[0]}</td>
+                    <td>{task.name}</td>
                     <td style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>
                       {result.executedModel && result.executedModel !== '-' ? result.executedModel.split('/').pop() : task.modelFriendly}
                     </td>
