@@ -1,6 +1,6 @@
 // Securely imported from .env via Vite
 const HF_TOKEN = import.meta.env.VITE_HF_TOKEN;
-const BASE_URL = "https://api-inference.huggingface.co/models/";
+const BASE_URL = "https://router.huggingface.co/hf-inference/models/";
 
 // Models
 const MODELS = {
@@ -114,12 +114,6 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null,
         }
       }
       throw new Error(`400 Bad Request: Incorrect JSON format or inputs for ${modelName}. Details: ${errorText}`);
-    }
-
-    const contentType = response.headers.get("Content-Type") || "";
-    if (response.ok && contentType.includes("image")) {
-      const blob = await response.blob();
-      return { status: response.status, data: blob, isImage: true };
     }
 
     const rawText = await response.text();
