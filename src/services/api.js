@@ -116,6 +116,13 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null,
       throw new Error(`400 Bad Request: Incorrect JSON format or inputs for ${modelName}. Details: ${errorText}`);
     }
 
+    const contentType = response.headers.get("Content-Type") || "";
+    const isImageTask = ["flux", "krea", "zimage", "sdxl"].includes(taskType);
+    if (response.ok && (contentType.includes("image") || isImageTask)) {
+      const blob = await response.blob();
+      return { status: response.status, data: blob, isImage: true };
+    }
+
     const rawText = await response.text();
     let json;
     try {
