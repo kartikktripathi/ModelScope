@@ -550,45 +550,6 @@ function App() {
                       <div className="error-text">
                         {result.data || result.raw}
                       </div>
-                      <div className="error-fixes-table">
-                        <div style={{ fontSize: '0.85rem', marginBottom: '0.5rem', color: '#fff', fontWeight: 500 }}>Common Errors and Fixes</div>
-                        <table className="observation-table error-table">
-                          <thead>
-                            <tr>
-                              <th>Error</th>
-                              <th>Cause</th>
-                              <th>Fix</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr>
-                              <td>401 Unauthorized</td>
-                              <td>Invalid or missing token</td>
-                              <td>Verify Bearer token</td>
-                            </tr>
-                            <tr>
-                              <td>400 Bad Request</td>
-                              <td>Incorrect JSON format</td>
-                              <td>Correct the request body</td>
-                            </tr>
-                            <tr>
-                              <td>Slow response</td>
-                              <td>Model cold start</td>
-                              <td>Retry after a few seconds</td>
-                            </tr>
-                            <tr>
-                              <td>Empty/delayed</td>
-                              <td>Model loading</td>
-                              <td>Wait and retry</td>
-                            </tr>
-                            <tr>
-                              <td style={{ color: 'var(--error)' }}>404 Not Found</td>
-                              <td>Model not hosted on Free Serverless API or missing organization prefix (e.g. meta-llama/)</td>
-                              <td>Use a hosted model string exactly as expected by the router</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
                     </div>
                   )}
                 </div>
