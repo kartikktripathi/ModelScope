@@ -17,6 +17,34 @@ const MODELS = {
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Checks if a model repository exists on Hugging Face Hub.
+ * Returns a friendly error message depending on whether the model is completely invalid
+ * or just unsupported for serverless inference.
+ * @param {string} cleanModelName 
+ * @param {AbortSignal} signal 
+ * @param {string} token 
+ * @returns {Promise<string>}
+ */
+async function checkModelSupport(cleanModelName, signal, token) {
+  try {
+    const response = await fetch(`https://huggingface.co/api/models/${cleanModelName}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      signal
+    });
+    if (response.status === 404) {
+      return "Error, not a valid model";
+    }
+    return "This model doesn't support serverless inference on Hugging Face.";
+  } catch (e) {
+    if (e.name === "AbortError") throw e;
+    return "This model doesn't support serverless inference on Hugging Face.";
+  }
+}
+
+/**
  * Execute an API call to Hugging Face with retry logic
  * @param {string} modelName - The HF model to use
  * @param {object} body - The JSON body to send
@@ -124,6 +152,19 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null,
           return { status: standardFallbackReq.status, data: standardJson };
         }
       }
+
+      let errorMsg = "";
+      try {
+        const parsed = JSON.parse(errorText);
+        errorMsg = parsed.error || "";
+      } catch (e) {
+        errorMsg = errorText;
+      }
+
+      if (errorMsg.includes("not supported by provider") || errorMsg.includes("no longer supported")) {
+        const friendlyMessage = await checkModelSupport(cleanModelName, signal, HF_TOKEN);
+        throw new Error(friendlyMessage);
+      }
       throw new Error(`400 Bad Request: Incorrect JSON format or inputs for ${modelName}. Details: ${errorText}`);
     }
 
@@ -181,6 +222,17 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null,
           }
         }
         
+        let errorMsg = rawText;
+        try {
+          const parsed = JSON.parse(rawText);
+          errorMsg = parsed.error || rawText;
+        } catch (pe) {}
+
+        if (errorMsg.includes("not supported by provider") || errorMsg.includes("no longer supported") || response.status === 404 || response.status === 410) {
+          const friendlyMessage = await checkModelSupport(cleanModelName, signal, HF_TOKEN);
+          throw new Error(friendlyMessage);
+        }
+
         throw new Error(`API Error for ${modelName}: ${response.status} ${response.statusText} - ${rawText}`);
       }
       throw new Error(`Invalid JSON from ${modelName}: ${rawText}`);
@@ -197,7 +249,14 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null,
     }
 
     if (!response.ok) {
-      throw new Error(`API Error for ${modelName}: ${response.status} ${response.statusText} - ${JSON.stringify(json)}`);
+      let errorMsg = JSON.stringify(json);
+      if (json && json.error) errorMsg = json.error;
+
+      if (errorMsg.includes("not supported by provider") || errorMsg.includes("no longer supported") || response.status === 404 || response.status === 410) {
+        const friendlyMessage = await checkModelSupport(cleanModelName, signal, HF_TOKEN);
+        throw new Error(friendlyMessage);
+      }
+      throw new Error(`API Error for ${modelName}: ${response.status} ${response.statusText} - ${errorMsg}`);
     }
 
     if (isChatFallback && json.choices) {

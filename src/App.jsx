@@ -365,35 +365,6 @@ function App() {
         const isAbort = error.name === 'AbortError' || (error.message && error.message.includes('aborted'));
         console.error(`Error in ${task.name}:`, error);
 
-        // Canvas fallback if connection fails
-        if (mode === 'image' && !isAbort) {
-          try {
-            const prompt = customPrompts[task.key] !== undefined ? customPrompts[task.key] : task.defaultPrompt;
-            const negativePrompt = customNegativePrompts[task.key] !== undefined ? customNegativePrompts[task.key] : (task.defaultNegativePrompt || "");
-            const ratio = customAspectRatios[task.key] !== undefined ? customAspectRatios[task.key] : (task.defaultAspectRatio || "1:1");
-            const guidanceScale = customGuidanceScales[task.key] !== undefined ? customGuidanceScales[task.key] : (task.defaultGuidanceScale || 7.5);
-            
-            console.warn(`HF Inference Offline. Constructing Canvas preview for ${task.name}...`);
-            const fallbackUrl = await generateFallbackImage(prompt, negativePrompt, ratio, guidanceScale);
-            
-            setResults(prev => ({
-              ...prev,
-              [task.key]: {
-                status: 'success',
-                data: fallbackUrl,
-                isImage: true,
-                statusCode: 'Fallback',
-                raw: `{\n  "status": "Fallback",\n  "error": "${error.message}",\n  "details": "Direct serverless inference failed. Displaying canvas generated preview."\n}`,
-                timeMs: 35,
-                executedModel: customModels[task.key] || task.endpoint
-              }
-            }));
-            continue;
-          } catch (fallbackError) {
-            console.error("Local fallback failed:", fallbackError);
-          }
-        }
-
         setResults(prev => ({
           ...prev,
           [task.key]: {
