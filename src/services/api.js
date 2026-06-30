@@ -1,6 +1,5 @@
 // Securely imported from .env via Vite
 const HF_TOKEN = import.meta.env.VITE_HF_TOKEN;
-const BASE_URL = "https://router.huggingface.co/hf-inference/models/";
 
 // Models
 const MODELS = {
@@ -27,10 +26,20 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export async function executeAiTask(modelName, body, retries = 3, signal = null, taskType = "generation") {
   const isImageTask = ["flux", "krea", "zimage", "sdxl"].includes(taskType);
 
+  // Parse custom provider prefix (e.g. together/meta-llama/Llama-3.1-8B-Instruct)
+  let provider = "hf-inference";
+  let cleanModelName = modelName;
+
+  const providerMatch = modelName.match(/^(hf-inference|together|fal-ai|replicate|novita|groq|sambanova|cerebras|featherless-ai|nebius|hyperbolic|deepinfra|friendliai|lepton|fireworks|nscale|octoai)\/(.+)$/i);
+  if (providerMatch) {
+    provider = providerMatch[1].toLowerCase();
+    cleanModelName = providerMatch[2];
+  }
+
   // Simulate API call if execution is not possible on the Hugging Face Router for openai-community/gpt2
-  if (modelName === "openai-community/gpt2") {
+  if (cleanModelName === "openai-community/gpt2") {
     if (signal?.aborted) throw new Error("AbortError");
-    console.warn(`Simulating request to ${modelName} because the serverless endpoint is 404 Not Found.`);
+    console.warn(`Simulating request to ${cleanModelName} because the serverless endpoint is 404 Not Found.`);
     await delay(1500); // Simulate network latency
     return {
       status: 200,
@@ -41,11 +50,11 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null,
   }
 
   // Determine if we should route to Chat Completions API by default
-  const isChatFallback = !isImageTask && modelName !== "openai-community/gpt2" && /llama|mistral|qwen|deepseek|instruct|chat|gemma|phi/i.test(modelName);
+  const isChatFallback = !isImageTask && cleanModelName !== "openai-community/gpt2" && /llama|mistral|qwen|deepseek|instruct|chat|gemma|phi/i.test(cleanModelName);
 
   const url = isChatFallback
     ? "https://router.huggingface.co/v1/chat/completions"
-    : `${BASE_URL}${modelName}`;
+    : `https://router.huggingface.co/${provider}/models/${cleanModelName}`;
 
   const getChatMessages = (task, input) => {
     let sys = "You are a helpful AI assistant.";
@@ -62,7 +71,7 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null,
   let requestBody;
   if (isChatFallback) {
     requestBody = {
-      model: modelName,
+      model: provider !== "hf-inference" ? `${cleanModelName}:${provider}` : cleanModelName,
       messages: getChatMessages(taskType, body.inputs),
       max_tokens: body.parameters?.max_new_tokens || 200
     };
@@ -104,7 +113,7 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null,
       if (isChatFallback) {
         console.warn(`400 Bad Request on Chat API for ${modelName}. Retrying on Standard Inference API...`);
         const fallbackRawPrompt = getChatMessages(taskType, body.inputs)[0].content + "\n\nOutput:";
-        const standardFallbackReq = await fetch(`${BASE_URL}${modelName}`, {
+        const standardFallbackReq = await fetch(`https://router.huggingface.co/${provider}/models/${cleanModelName}`, {
           method: "POST",
           headers: { Authorization: `Bearer ${HF_TOKEN}`, "Content-Type": "application/json" },
           body: JSON.stringify({ ...body, inputs: fallbackRawPrompt }),
@@ -160,7 +169,7 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null,
         if (isChatFallback && response.status === 404) {
           console.warn(`404 Not Found on Chat route for ${modelName}. Retrying on Standard Inference API...`);
           const fallbackRawPrompt = getChatMessages(taskType, body.inputs)[0].content + "\n\nOutput:";
-          const standardFallbackReq = await fetch(`${BASE_URL}${modelName}`, {
+          const standardFallbackReq = await fetch(`https://router.huggingface.co/${provider}/models/${cleanModelName}`, {
             method: "POST",
             headers: { Authorization: `Bearer ${HF_TOKEN}`, "Content-Type": "application/json" },
             body: JSON.stringify({ ...body, inputs: fallbackRawPrompt }),
