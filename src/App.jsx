@@ -66,8 +66,7 @@ const IMAGE_CONFIG = [
     name: "Negative Prompt Test",
     endpoint: "stabilityai/stable-diffusion-3-medium-diffusers",
     modelFriendly: "SD 3 Medium (Diffusers)",
-    defaultPrompt: "A futuristic cyberpunk cityscape with neon lights, high resolution, 8k",
-    defaultNegativePrompt: "blurry, low quality, distorted anatomy, extra limbs",
+    defaultPrompt: "A futuristic cyberpunk cityscape with neon lights, blurry, low quality, distorted anatomy, extra limbs",
     expectedField: "image",
     testType: "negative"
   },
@@ -511,21 +510,6 @@ function App() {
                         style={{ resize: 'vertical', minHeight: '60px', lineHeight: '1.4' }}
                       />
                     </div>
-
-                    {task.testType === "negative" && (
-                      <div className="input-group">
-                        <label htmlFor={`negative-${task.key}`}>Negative Prompt (Optional)</label>
-                        <input
-                          id={`negative-${task.key}`}
-                          type="text"
-                          placeholder={task.defaultNegativePrompt}
-                          value={customNegativePrompts[task.key] !== undefined ? customNegativePrompts[task.key] : task.defaultNegativePrompt}
-                          onChange={(e) => setCustomNegativePrompts({ ...customNegativePrompts, [task.key]: e.target.value })}
-                          className="model-input"
-                          disabled={isRunning}
-                        />
-                      </div>
-                    )}
 
                     {task.testType === "ratio" && (
                       <div className="input-group">
