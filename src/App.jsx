@@ -55,8 +55,8 @@ const IMAGE_CONFIG = [
   {
     key: "flux",
     name: "Input Prompt Test",
-    endpoint: "black-forest-labs/FLUX.1-dev",
-    modelFriendly: "FLUX.1-dev",
+    endpoint: "black-forest-labs/FLUX.1-schnell",
+    modelFriendly: "FLUX.1-schnell",
     defaultPrompt: "A futuristic cyberpunk cityscape with neon lights, high resolution, 8k",
     expectedField: "image",
     testType: "prompt"
@@ -64,8 +64,8 @@ const IMAGE_CONFIG = [
   {
     key: "krea",
     name: "Negative Prompt Test",
-    endpoint: "krea/Krea-2-Turbo",
-    modelFriendly: "Krea-2-Turbo",
+    endpoint: "stabilityai/stable-diffusion-3-medium-diffusers",
+    modelFriendly: "SD 3 Medium (Diffusers)",
     defaultPrompt: "A futuristic cyberpunk cityscape with neon lights, high resolution, 8k",
     defaultNegativePrompt: "blurry, low quality, distorted anatomy, extra limbs",
     expectedField: "image",
@@ -74,8 +74,8 @@ const IMAGE_CONFIG = [
   {
     key: "zimage",
     name: "Aspect Ratio Test",
-    endpoint: "Tongyi-MAI/Z-Image-Turbo",
-    modelFriendly: "Z-Image-Turbo",
+    endpoint: "stabilityai/stable-diffusion-3-medium-diffusers",
+    modelFriendly: "SD 3 Medium (Diffusers)",
     defaultPrompt: "A futuristic cyberpunk cityscape with neon lights, high resolution, 8k",
     defaultAspectRatio: "1:1",
     expectedField: "image",
@@ -84,8 +84,8 @@ const IMAGE_CONFIG = [
   {
     key: "sdxl",
     name: "Guidance Scale Test",
-    endpoint: "stabilityai/stable-diffusion-xl-base-1.0",
-    modelFriendly: "stable-diffusion-xl-base-1.0",
+    endpoint: "stabilityai/stable-diffusion-3-medium-diffusers",
+    modelFriendly: "SD 3 Medium (Diffusers)",
     defaultPrompt: "A futuristic cyberpunk cityscape with neon lights, high resolution, 8k",
     defaultGuidanceScale: 7.5,
     expectedField: "image",

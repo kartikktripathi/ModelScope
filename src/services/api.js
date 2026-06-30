@@ -25,6 +25,8 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * @returns {Promise<any>}
  */
 export async function executeAiTask(modelName, body, retries = 3, signal = null, taskType = "generation") {
+  const isImageTask = ["flux", "krea", "zimage", "sdxl"].includes(taskType);
+
   // Simulate API call if execution is not possible on the Hugging Face Router for openai-community/gpt2
   if (modelName === "openai-community/gpt2") {
     if (signal?.aborted) throw new Error("AbortError");
@@ -38,8 +40,8 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null,
     };
   }
 
-    // Determine if we should route to Chat Completions API by default
-  const isChatFallback = modelName !== "openai-community/gpt2" && /llama|mistral|qwen|deepseek|instruct|chat|gemma|phi/i.test(modelName);
+  // Determine if we should route to Chat Completions API by default
+  const isChatFallback = !isImageTask && modelName !== "openai-community/gpt2" && /llama|mistral|qwen|deepseek|instruct|chat|gemma|phi/i.test(modelName);
 
   const url = isChatFallback
     ? "https://router.huggingface.co/v1/chat/completions"
@@ -117,7 +119,6 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null,
     }
 
     const contentType = response.headers.get("Content-Type") || "";
-    const isImageTask = ["flux", "krea", "zimage", "sdxl"].includes(taskType);
     if (response.ok && (contentType.includes("image") || isImageTask)) {
       const blob = await response.blob();
       return { status: response.status, data: blob, isImage: true };
@@ -129,7 +130,7 @@ export async function executeAiTask(modelName, body, retries = 3, signal = null,
       json = JSON.parse(rawText);
     } catch (e) {
       if (!response.ok) {
-        if (!isChatFallback && response.status === 404) {
+        if (!isImageTask && !isChatFallback && response.status === 404) {
           // Attempt Chat Completions Fallback for generic models unrecognized by regex
           console.warn(`404 Not Found on standard route for ${modelName}. Attempting v1/chat/completions fallback...`);
           try {
